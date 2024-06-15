@@ -1,0 +1,168 @@
+package main
+
+import (
+	"compress/gzip"
+	"io"
+	"net/http"
+	"net/url"
+	"strings"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/kelindar/binary"
+	"github.com/tidwall/gjson"
+)
+
+type Media struct {
+	TypeName string
+	URL      string
+}
+
+type InstaData struct {
+	PostID   string
+	Username string
+	Caption  string
+	Medias   []Media
+}
+
+func main() {
+	r := chi.NewRouter()
+	r.Use(middleware.Logger)
+	r.Get("/scrape/{postID}", Scrape)
+	err := http.ListenAndServe(":3000", r)
+	if err != nil {
+		println(err)
+	}
+}
+
+func Scrape(w http.ResponseWriter, r *http.Request) {
+	postID := chi.URLParam(r, "postID")
+
+	var i InstaData
+	var data gjson.Result
+
+	// 1. Use Embed
+	// 2. Scrape from graphql
+	response, err := ParseGQL(postID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	data = gjson.ParseBytes(response).Get("data")
+
+	item := data.Get("shortcode_media")
+	if !item.Exists() {
+		item = data.Get("xdt_shortcode_media")
+		if !item.Exists() {
+			http.Error(w, "Post not found", http.StatusNotFound)
+			return
+		}
+	}
+
+	media := []gjson.Result{item}
+	if item.Get("edge_sidecar_to_children").Exists() {
+		media = item.Get("edge_sidecar_to_children.edges").Array()
+	}
+
+	i.PostID = postID
+
+	// Get username
+	i.Username = item.Get("owner.username").String()
+
+	// Get caption
+	i.Caption = item.Get("edge_media_to_caption.edges.0.node.text").String()
+
+	// Get medias
+	i.Medias = make([]Media, 0, len(media))
+	for _, m := range media {
+		if m.Get("node").Exists() {
+			m = m.Get("node")
+		}
+		mediaURL := m.Get("video_url")
+		if !mediaURL.Exists() {
+			mediaURL = m.Get("display_url")
+		}
+		i.Medias = append(i.Medias, Media{
+			TypeName: m.Get("__typename").String(),
+			URL:      mediaURL.String(),
+		})
+	}
+
+	gw := gzip.NewWriter(w)
+	w.Header().Set("Content-Encoding", "gzip")
+	defer gw.Close()
+
+	err = binary.MarshalTo(i, gw)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func ParseGQL(postID string) ([]byte, error) {
+	gqlParams := url.Values{
+		"av":                       {"0"},
+		"__d":                      {"www"},
+		"__user":                   {"0"},
+		"__a":                      {"1"},
+		"__req":                    {"k"},
+		"__hs":                     {"19888.HYP:instagram_web_pkg.2.1..0.0"},
+		"dpr":                      {"2"},
+		"__ccg":                    {"UNKNOWN"},
+		"__rev":                    {"1014227545"},
+		"__s":                      {"trbjos:n8dn55:yev1rm"},
+		"__hsi":                    {"7380500578385702299"},
+		"__dyn":                    {"7xeUjG1mxu1syUbFp40NonwgU7SbzEdF8aUco2qwJw5ux609vCwjE1xoswaq0yE6ucw5Mx62G5UswoEcE7O2l0Fwqo31w9a9wtUd8-U2zxe2GewGw9a362W2K0zK5o4q3y1Sx-0iS2Sq2-azo7u3C2u2J0bS1LwTwKG1pg2fwxyo6O1FwlEcUed6goK2O4UrAwCAxW6Uf9EObzVU8U"},
+		"__csr":                    {"n2Yfg_5hcQAG5mPtfEzil8Wn-DpKGBXhdczlAhrK8uHBAGuKCJeCieLDyExenh68aQAKta8p8ShogKkF5yaUBqCpF9XHmmhoBXyBKbQp0HCwDjqoOepV8Tzk8xeXqAGFTVoCciGaCgvGUtVU-u5Vp801nrEkO0rC58xw41g0VW07ISyie2W1v7F0CwYwwwvEkw8K5cM0VC1dwdi0hCbc094w6MU1xE02lzw"},
+		"__comet_req":              {"7"},
+		"lsd":                      {"AVoPBTXMX0Y"},
+		"jazoest":                  {"2882"},
+		"__spin_r":                 {"1014227545"},
+		"__spin_b":                 {"trunk"},
+		"__spin_t":                 {"1718406700"},
+		"fb_api_caller_class":      {"RelayModern"},
+		"fb_api_req_friendly_name": {"PolarisPostActionLoadPostQueryQuery"},
+		"variables":                {`{"shortcode":"` + postID + `"}`},
+		"server_timestamps":        {"true"},
+		"doc_id":                   {"25531498899829322"},
+	}
+
+	client := http.Client{}
+	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(gqlParams.Encode()))
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Set("accept", "*/*")
+	req.Header.Set("accept-language", "en-US,en;q=0.9")
+	req.Header.Set("content-type", "application/x-www-form-urlencoded")
+	req.Header.Set("origin", "https://www.instagram.com")
+	req.Header.Set("priority", "u=1, i")
+	req.Header.Set("sec-ch-prefers-color-scheme", "dark")
+	req.Header.Set("sec-ch-ua", `"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"`)
+	req.Header.Set("sec-ch-ua-full-version-list", `"Google Chrome";v="125.0.6422.142", "Chromium";v="125.0.6422.142", "Not.A/Brand";v="24.0.0.0"`)
+	req.Header.Set("sec-ch-ua-mobile", "?0")
+	req.Header.Set("sec-ch-ua-model", `""`)
+	req.Header.Set("sec-ch-ua-platform", `"macOS"`)
+	req.Header.Set("sec-ch-ua-platform-version", `"12.7.4"`)
+	req.Header.Set("sec-fetch-dest", "empty")
+	req.Header.Set("sec-fetch-mode", "cors")
+	req.Header.Set("sec-fetch-site", "same-origin")
+	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
+	req.Header.Set("x-asbd-id", "129477")
+	req.Header.Set("x-bloks-version-id", "e2004666934296f275a5c6b2c9477b63c80977c7cc0fd4b9867cb37e36092b68")
+	req.Header.Set("x-fb-friendly-name", "PolarisPostActionLoadPostQueryQuery")
+	req.Header.Set("x-ig-app-id", "936619743392459")
+
+	res, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer res.Body.Close()
+
+	gqlResponse, err := io.ReadAll(res.Body)
+	if err != nil {
+		return nil, err
+	}
+	return gqlResponse, nil
+}
