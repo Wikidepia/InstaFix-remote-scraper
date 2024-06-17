@@ -28,8 +28,14 @@ type InstaData struct {
 func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
-	r.Get("/scrape/{postID}", gzhttp.GzipHandler(http.HandlerFunc(Scrape)))
-	err := http.ListenAndServe(":3001", r)
+
+	handler, err := gzhttp.NewWrapper(gzhttp.MinSize(0))
+	if err != nil {
+		println(err)
+	}
+	r.Get("/scrape/{postID}", handler(http.HandlerFunc(Scrape)))
+
+	err = http.ListenAndServe(":3001", r)
 	if err != nil {
 		println(err)
 	}
