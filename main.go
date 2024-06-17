@@ -1,7 +1,6 @@
 package main
 
 import (
-	"compress/gzip"
 	"io"
 	"net/http"
 	"net/url"
@@ -10,6 +9,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
+	"github.com/klauspost/compress/gzhttp"
 	"github.com/tidwall/gjson"
 )
 
@@ -28,8 +28,8 @@ type InstaData struct {
 func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
-	r.Get("/scrape/{postID}", Scrape)
-	err := http.ListenAndServe(":3000", r)
+	r.Get("/scrape/{postID}", gzhttp.GzipHandler(http.HandlerFunc(Scrape)))
+	err := http.ListenAndServe(":3001", r)
 	if err != nil {
 		println(err)
 	}
@@ -88,11 +88,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	gw := gzip.NewWriter(w)
-	w.Header().Set("Content-Encoding", "gzip")
-	defer gw.Close()
-
-	err = binary.MarshalTo(i, gw)
+	err = binary.MarshalTo(i, w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
