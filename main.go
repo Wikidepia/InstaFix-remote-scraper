@@ -1,15 +1,18 @@
 package main
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
 	"github.com/klauspost/compress/gzhttp"
+	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 )
 
@@ -94,11 +97,22 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	err = binary.MarshalTo(i, w)
+	// Read dictionary
+	dict, err := os.ReadFile("dictionary")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+
+	zw, _ := zstd.NewWriter(nil, zstd.WithEncoderDict(dict))
+	defer zw.Close()
+
+	// Marshal the data
+	bb, _ := binary.Marshal(i)
+	dst := zw.EncodeAll(bb, nil)
+
+	fmt.Println(len(dst))
+	w.Write(dst)
 }
 
 func ParseGQL(postID string) ([]byte, error) {
