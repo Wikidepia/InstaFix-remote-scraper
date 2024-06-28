@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -25,7 +27,22 @@ type InstaData struct {
 	Medias   []Media
 }
 
+var dialer = net.Dialer{
+	Resolver: &net.Resolver{
+		PreferGo: true,
+		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+			d := net.Dialer{}
+			return d.DialContext(ctx, "udp", "8.8.8.8:53")
+		},
+	},
+}
+var transport = &http.Transport{DialContext: dialer.DialContext}
+
 func main() {
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.DialContext(ctx, "tcp4", addr)
+	}
+
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 
@@ -129,7 +146,9 @@ func ParseGQL(postID string) ([]byte, error) {
 		"doc_id":                   {"25531498899829322"},
 	}
 
-	client := http.Client{}
+	client := http.Client{
+		Transport: transport,
+	}
 	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(gqlParams.Encode()))
 	if err != nil {
 		return nil, err
