@@ -180,26 +180,28 @@ func ParseGQL(postID string) ([]byte, error) {
 		return nil, err
 	}
 
-	req.Header.Set("accept", "*/*")
-	req.Header.Set("accept-language", "en-US,en;q=0.9")
-	req.Header.Set("content-type", "application/x-www-form-urlencoded")
-	req.Header.Set("origin", "https://www.instagram.com")
-	req.Header.Set("priority", "u=1, i")
-	req.Header.Set("sec-ch-prefers-color-scheme", "dark")
-	req.Header.Set("sec-ch-ua", `"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"`)
-	req.Header.Set("sec-ch-ua-full-version-list", `"Google Chrome";v="125.0.6422.142", "Chromium";v="125.0.6422.142", "Not.A/Brand";v="24.0.0.0"`)
-	req.Header.Set("sec-ch-ua-mobile", "?0")
-	req.Header.Set("sec-ch-ua-model", `""`)
-	req.Header.Set("sec-ch-ua-platform", `"macOS"`)
-	req.Header.Set("sec-ch-ua-platform-version", `"12.7.4"`)
-	req.Header.Set("sec-fetch-dest", "empty")
-	req.Header.Set("sec-fetch-mode", "cors")
-	req.Header.Set("sec-fetch-site", "same-origin")
-	req.Header.Set("user-agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36")
-	req.Header.Set("x-asbd-id", "129477")
-	req.Header.Set("x-bloks-version-id", "e2004666934296f275a5c6b2c9477b63c80977c7cc0fd4b9867cb37e36092b68")
-	req.Header.Set("x-fb-friendly-name", "PolarisPostActionLoadPostQueryQuery")
-	req.Header.Set("x-ig-app-id", "936619743392459")
+	req.Header = http.Header{
+		"accept":                      {"*/*"},
+		"accept-language":             {"en-US,en;q=0.9"},
+		"content-type":                {"application/x-www-form-urlencoded"},
+		"origin":                      {"https://www.instagram.com"},
+		"priority":                    {"u=1, i"},
+		"sec-ch-prefers-color-scheme": {"dark"},
+		"sec-ch-ua":                   {`"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"`},
+		"sec-ch-ua-full-version-list": {`"Google Chrome";v="125.0.6422.142", "Chromium";v="125.0.6422.142", "Not.A/Brand";v="24.0.0.0"`},
+		"sec-ch-ua-mobile":            {"?0"},
+		"sec-ch-ua-model":             {`""`},
+		"sec-ch-ua-platform":          {`"macOS"`},
+		"sec-ch-ua-platform-version":  {`"12.7.4"`},
+		"sec-fetch-dest":              {"empty"},
+		"sec-fetch-mode":              {"cors"},
+		"sec-fetch-site":              {"same-origin"},
+		"user-agent":                  {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"},
+		"x-asbd-id":                   {"129477"},
+		"x-bloks-version-id":          {"e2004666934296f275a5c6b2c9477b63c80977c7cc0fd4b9867cb37e36092b68"},
+		"x-fb-friendly-name":          {"PolarisPostActionLoadPostQueryQuery"},
+		"x-ig-app-id":                 {"936619743392459"},
+	}
 
 	res, err := client.Do(req)
 	if err != nil {
