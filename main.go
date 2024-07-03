@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -81,6 +82,12 @@ var header = http.Header{
 	"x-ig-app-id":                 {"936619743392459"},
 }
 
+// b2s converts byte slice to a string without memory allocation.
+// See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
+func b2s(b []byte) string {
+	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
 func main() {
 	// Clear dnscache every 5 minutes
 	go func() {
@@ -120,7 +127,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	data = gjson.ParseBytes(response).Get("data")
+	data = gjson.Parse(b2s(response)).Get("data")
 
 	item := data.Get("shortcode_media")
 	if !item.Exists() {
