@@ -12,20 +12,21 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
+	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/rs/dnscache"
 	"github.com/tidwall/gjson"
 )
 
 type Media struct {
-	TypeName string
-	URL      string
+	TypeName nocopy.String
+	URL      nocopy.String
 }
 
 type InstaData struct {
-	PostID   string
-	Username string
-	Caption  string
+	PostID   nocopy.String
+	Username nocopy.String
+	Caption  nocopy.String
 	Medias   []Media
 }
 
@@ -135,13 +136,13 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		media = item.Get("edge_sidecar_to_children.edges").Array()
 	}
 
-	i.PostID = postID
+	i.PostID = nocopy.String(postID)
 
 	// Get username
-	i.Username = item.Get("owner.username").String()
+	i.Username = nocopy.String(item.Get("owner.username").String())
 
 	// Get caption
-	i.Caption = item.Get("edge_media_to_caption.edges.0.node.text").String()
+	i.Caption = nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String())
 
 	// Get medias
 	i.Medias = make([]Media, 0, len(media))
@@ -154,8 +155,8 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 			mediaURL = m.Get("display_url")
 		}
 		i.Medias = append(i.Medias, Media{
-			TypeName: m.Get("__typename").String(),
-			URL:      mediaURL.String(),
+			TypeName: nocopy.String(m.Get("__typename").String()),
+			URL:      nocopy.String(mediaURL.String()),
 		})
 	}
 
