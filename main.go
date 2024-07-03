@@ -57,6 +57,28 @@ var transport = &http.Transport{
 		return
 	},
 }
+var header = http.Header{
+	"accept":                      {"*/*"},
+	"accept-language":             {"en-US,en;q=0.9"},
+	"content-type":                {"application/x-www-form-urlencoded"},
+	"origin":                      {"https://www.instagram.com"},
+	"priority":                    {"u=1, i"},
+	"sec-ch-prefers-color-scheme": {"dark"},
+	"sec-ch-ua":                   {`"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"`},
+	"sec-ch-ua-full-version-list": {`"Google Chrome";v="125.0.6422.142", "Chromium";v="125.0.6422.142", "Not.A/Brand";v="24.0.0.0"`},
+	"sec-ch-ua-mobile":            {"?0"},
+	"sec-ch-ua-model":             {`""`},
+	"sec-ch-ua-platform":          {`"macOS"`},
+	"sec-ch-ua-platform-version":  {`"12.7.4"`},
+	"sec-fetch-dest":              {"empty"},
+	"sec-fetch-mode":              {"cors"},
+	"sec-fetch-site":              {"same-origin"},
+	"user-agent":                  {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"},
+	"x-asbd-id":                   {"129477"},
+	"x-bloks-version-id":          {"e2004666934296f275a5c6b2c9477b63c80977c7cc0fd4b9867cb37e36092b68"},
+	"x-fb-friendly-name":          {"PolarisPostActionLoadPostQueryQuery"},
+	"x-ig-app-id":                 {"936619743392459"},
+}
 
 func main() {
 	// Clear dnscache every 5 minutes
@@ -180,28 +202,7 @@ func ParseGQL(postID string) ([]byte, error) {
 		return nil, err
 	}
 
-	req.Header = http.Header{
-		"accept":                      {"*/*"},
-		"accept-language":             {"en-US,en;q=0.9"},
-		"content-type":                {"application/x-www-form-urlencoded"},
-		"origin":                      {"https://www.instagram.com"},
-		"priority":                    {"u=1, i"},
-		"sec-ch-prefers-color-scheme": {"dark"},
-		"sec-ch-ua":                   {`"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"`},
-		"sec-ch-ua-full-version-list": {`"Google Chrome";v="125.0.6422.142", "Chromium";v="125.0.6422.142", "Not.A/Brand";v="24.0.0.0"`},
-		"sec-ch-ua-mobile":            {"?0"},
-		"sec-ch-ua-model":             {`""`},
-		"sec-ch-ua-platform":          {`"macOS"`},
-		"sec-ch-ua-platform-version":  {`"12.7.4"`},
-		"sec-fetch-dest":              {"empty"},
-		"sec-fetch-mode":              {"cors"},
-		"sec-fetch-site":              {"same-origin"},
-		"user-agent":                  {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"},
-		"x-asbd-id":                   {"129477"},
-		"x-bloks-version-id":          {"e2004666934296f275a5c6b2c9477b63c80977c7cc0fd4b9867cb37e36092b68"},
-		"x-fb-friendly-name":          {"PolarisPostActionLoadPostQueryQuery"},
-		"x-ig-app-id":                 {"936619743392459"},
-	}
+	req.Header = header
 
 	res, err := client.Do(req)
 	if err != nil {
