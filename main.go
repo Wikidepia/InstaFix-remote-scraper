@@ -51,7 +51,7 @@ var transport = &http.Transport{
 		}
 		for _, ip := range ips {
 			var dialer net.Dialer
-			conn, err = dialer.DialContext(ctx, network, net.JoinHostPort(ip, port))
+			conn, err = dialer.DialContext(ctx, "tcp4", net.JoinHostPort(ip, port))
 			if err == nil {
 				break
 			}
