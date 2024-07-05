@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 	"unsafe"
 
 	"github.com/go-chi/chi/v5"
@@ -15,7 +14,6 @@ import (
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
-	"github.com/rs/dnscache"
 	"github.com/tidwall/gjson"
 )
 
@@ -31,34 +29,17 @@ type InstaData struct {
 	Medias   []Media
 }
 
-var resolver = &dnscache.Resolver{
+var dialer = net.Dialer{
 	Resolver: &net.Resolver{
+		PreferGo: true,
 		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
 			d := net.Dialer{}
 			return d.DialContext(ctx, "udp", "8.8.8.8:53")
 		},
 	},
 }
-var transport = &http.Transport{
-	DialContext: func(ctx context.Context, network string, addr string) (conn net.Conn, err error) {
-		host, port, err := net.SplitHostPort(addr)
-		if err != nil {
-			return nil, err
-		}
-		ips, err := resolver.LookupHost(ctx, host)
-		if err != nil {
-			return nil, err
-		}
-		for _, ip := range ips {
-			var dialer net.Dialer
-			conn, err = dialer.DialContext(ctx, "tcp4", net.JoinHostPort(ip, port))
-			if err == nil {
-				break
-			}
-		}
-		return
-	},
-}
+var transport = &http.Transport{DialContext: dialer.DialContext}
+
 var header = http.Header{
 	"accept":                      {"*/*"},
 	"accept-language":             {"en-US,en;q=0.9"},
@@ -89,14 +70,9 @@ func b2s(b []byte) string {
 }
 
 func main() {
-	// Clear dnscache every 5 minutes
-	go func() {
-		t := time.NewTicker(5 * time.Minute)
-		defer t.Stop()
-		for range t.C {
-			resolver.Refresh(true)
-		}
-	}()
+	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.DialContext(ctx, "tcp4", addr)
+	}
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
