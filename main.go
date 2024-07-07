@@ -15,6 +15,7 @@ import (
 	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/tidwall/gjson"
+	"go.uber.org/ratelimit"
 )
 
 type Media struct {
@@ -63,6 +64,8 @@ var header = http.Header{
 	"x-ig-app-id":                 {"936619743392459"},
 }
 
+var rl = ratelimit.New(20)
+
 // b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
 func b2s(b []byte) string {
@@ -91,6 +94,7 @@ func main() {
 }
 
 func Scrape(w http.ResponseWriter, r *http.Request) {
+	rl.Take()
 	postID := chi.URLParam(r, "postID")
 
 	var i InstaData
