@@ -1,7 +1,7 @@
 package main
 
 import (
-	"io"
+	"bytes"
 	"net/http"
 	"net/url"
 	"strings"
@@ -186,15 +186,25 @@ func ParseGQL(postID string) ([]byte, error) {
 
 	req.Header = header
 
-	res, err := client.Do(req)
+	buf := new(bytes.Buffer)
+	var res *http.Response
+	for i := 0; i < 3; i++ {
+		res, err = client.Do(req)
+		if err != nil {
+			continue
+		}
+		defer res.Body.Close()
+		buf.Reset() // Reset buffer
+		if _, err = buf.ReadFrom(res.Body); err != nil {
+			continue
+		}
+		if bytes.Contains(buf.Bytes(), []byte("require_login")) {
+			continue
+		}
+		break
+	}
 	if err != nil {
 		return nil, err
 	}
-	defer res.Body.Close()
-
-	gqlResponse, err := io.ReadAll(res.Body)
-	if err != nil {
-		return nil, err
-	}
-	return gqlResponse, nil
+	return buf.Bytes(), nil
 }
