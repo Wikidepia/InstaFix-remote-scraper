@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	_ "embed"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
-	"github.com/klauspost/compress/gzhttp"
+	"github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 	"go.mercari.io/go-dnscache"
 	"go.uber.org/ratelimit"
@@ -54,8 +55,10 @@ var header = http.Header{
 	"x-fb-friendly-name":          {"PolarisPostActionLoadPostQueryQuery"},
 	"x-ig-app-id":                 {"936619743392459"},
 }
-
 var rl = ratelimit.New(20)
+
+//go:embed zstd.dict
+var zstdDict []byte
 
 // b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
@@ -75,11 +78,7 @@ func main() {
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 
-	handler, err := gzhttp.NewWrapper(gzhttp.MinSize(0))
-	if err != nil {
-		println(err)
-	}
-	r.Get("/scrape/{postID}", handler(http.HandlerFunc(Scrape)))
+	r.Get("/scrape/{postID}", Scrape)
 
 	err = http.ListenAndServe(":3001", r)
 	if err != nil {
@@ -141,7 +140,10 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	err = binary.MarshalTo(i, w)
+	zstdw, _ := zstd.NewWriter(w, zstd.WithEncoderDict(zstdDict))
+	defer zstdw.Close()
+
+	err = binary.MarshalTo(i, zstdw)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
