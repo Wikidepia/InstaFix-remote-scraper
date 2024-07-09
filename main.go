@@ -1,12 +1,11 @@
 package main
 
 import (
-	"context"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 	"unsafe"
 
 	"github.com/go-chi/chi/v5"
@@ -15,7 +14,9 @@ import (
 	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/tidwall/gjson"
+	"go.mercari.io/go-dnscache"
 	"go.uber.org/ratelimit"
+	"golang.org/x/exp/rand"
 )
 
 type Media struct {
@@ -30,17 +31,7 @@ type InstaData struct {
 	Medias   []Media
 }
 
-var dialer = net.Dialer{
-	Resolver: &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{}
-			return d.DialContext(ctx, "udp", "8.8.8.8:53")
-		},
-	},
-}
-var transport = &http.Transport{DialContext: dialer.DialContext}
-
+var transport = &http.Transport{}
 var header = http.Header{
 	"accept":                      {"*/*"},
 	"accept-language":             {"en-US,en;q=0.9"},
@@ -73,9 +64,12 @@ func b2s(b []byte) string {
 }
 
 func main() {
-	transport.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
-		return dialer.DialContext(ctx, "tcp4", addr)
+	resolver, err := dnscache.New(5*time.Minute, 5*time.Second)
+	if err != nil {
+		panic(err)
 	}
+	rand.Seed(uint64(time.Now().UTC().UnixNano()))
+	transport.DialContext = dnscache.DialFunc(resolver, nil)
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)

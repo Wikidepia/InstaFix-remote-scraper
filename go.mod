@@ -7,7 +7,9 @@ require (
 	github.com/kelindar/binary v1.0.19
 	github.com/klauspost/compress v1.17.9
 	github.com/tidwall/gjson v1.17.1
+	go.mercari.io/go-dnscache v0.3.0
 	go.uber.org/ratelimit v0.3.1
+	golang.org/x/exp v0.0.0-20240707233637-46b078467d37
 )
 
 require (
