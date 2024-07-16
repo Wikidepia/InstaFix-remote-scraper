@@ -70,7 +70,7 @@ func main() {
 	}
 	rand.Seed(uint64(time.Now().UTC().UnixNano()))
 	transportCache := &http.Transport{
-		ForceAttemptHTTP2:     true,
+		// ForceAttemptHTTP2:     true,
 		DialContext:           dnscache.DialFunc(resolver, nil),
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
