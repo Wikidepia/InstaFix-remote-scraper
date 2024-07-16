@@ -30,7 +30,14 @@ type InstaData struct {
 	Medias   []Media
 }
 
-var transport = &http.Transport{}
+// Copied from DefaultTransport
+var transport = &http.Transport{
+	ForceAttemptHTTP2:     true,
+	MaxIdleConns:          100,
+	IdleConnTimeout:       90 * time.Second,
+	TLSHandshakeTimeout:   10 * time.Second,
+	ExpectContinueTimeout: 1 * time.Second,
+}
 var header = http.Header{
 	"accept":                      {"*/*"},
 	"accept-language":             {"en-US,en;q=0.9"},
@@ -151,7 +158,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 func ParseGQL(postID string) ([]byte, error) {
 	newParams := strings.Replace(postData, "$$POSTID$$", postID, -1)
 	client := http.Client{
-		Transport: transport,
+		Transport: gzhttp.Transport(transport, gzhttp.TransportAlwaysDecompress(true)),
 	}
 	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(newParams))
 	if err != nil {

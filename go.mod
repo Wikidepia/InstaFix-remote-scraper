@@ -5,7 +5,7 @@ go 1.21.5
 require (
 	github.com/go-chi/chi/v5 v5.0.12
 	github.com/kelindar/binary v1.0.19
-	github.com/klauspost/compress v1.17.9
+	github.com/klauspost/compress v1.17.10-0.20240702191253-9cfdc94f9b07
 	github.com/tidwall/gjson v1.17.1
 	go.mercari.io/go-dnscache v0.3.0
 	go.uber.org/ratelimit v0.3.1
