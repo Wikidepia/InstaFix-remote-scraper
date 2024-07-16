@@ -169,6 +169,7 @@ func ParseGQL(postID string) ([]byte, error) {
 
 	buf := new(bytes.Buffer)
 	var res *http.Response
+	// TODO Sometimes api returns 5xx error, retrying doesn't help.
 	for i := 0; i < 3; i++ {
 		res, err = client.Do(req)
 		if err != nil {
