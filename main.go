@@ -73,6 +73,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Mount("/debug", middleware.Profiler())
 
 	handler, err := gzhttp.NewWrapper(gzhttp.MinSize(0))
 	if err != nil {
