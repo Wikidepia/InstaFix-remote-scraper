@@ -31,13 +31,7 @@ type InstaData struct {
 }
 
 // Copied from DefaultTransport
-var transport = &http.Transport{
-	ForceAttemptHTTP2:     true,
-	MaxIdleConns:          100,
-	IdleConnTimeout:       90 * time.Second,
-	TLSHandshakeTimeout:   10 * time.Second,
-	ExpectContinueTimeout: 1 * time.Second,
-}
+var transport http.RoundTripper
 var header = http.Header{
 	"accept":                      {"*/*"},
 	"accept-language":             {"en-US,en;q=0.9"},
@@ -75,7 +69,15 @@ func main() {
 		panic(err)
 	}
 	rand.Seed(uint64(time.Now().UTC().UnixNano()))
-	transport.DialContext = dnscache.DialFunc(resolver, nil)
+	transportCache := &http.Transport{
+		ForceAttemptHTTP2:     true,
+		DialContext:           dnscache.DialFunc(resolver, nil),
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
@@ -158,7 +160,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 func ParseGQL(postID string) ([]byte, error) {
 	newParams := strings.Replace(postData, "$$POSTID$$", postID, -1)
 	client := http.Client{
-		Transport: gzhttp.Transport(transport, gzhttp.TransportAlwaysDecompress(true)),
+		Transport: transport,
 	}
 	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(newParams))
 	if err != nil {
