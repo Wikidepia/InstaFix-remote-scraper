@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"net/http"
 	"strings"
 	"time"
@@ -72,6 +73,7 @@ func main() {
 	transportCache := &http.Transport{
 		// ForceAttemptHTTP2:     true,
 		DialContext:           dnscache.DialFunc(resolver, nil),
+		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
