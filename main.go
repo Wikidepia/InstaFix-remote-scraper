@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 	"unsafe"
@@ -13,6 +14,8 @@ import (
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/tidwall/gjson"
 	"go.mercari.io/go-dnscache"
 	"go.uber.org/ratelimit"
@@ -64,6 +67,25 @@ func b2s(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
+// Logger is a middleware that logs incoming requests with zerolog including panics.
+// From https://github.com/Lavalier/zchi
+func Logger(logger zerolog.Logger) func(next http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		fn := func(w http.ResponseWriter, r *http.Request) {
+			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+			defer func() {
+				if r := recover(); r != nil && r != http.ErrAbortHandler {
+					logger.Error().Interface("recover", r).Bytes("stack", debug.Stack()).Msg("incoming_request_panic")
+					ww.WriteHeader(http.StatusInternalServerError)
+				}
+				logger.Info().Str("path", r.URL.Path).Int("status", ww.Status()).Int("bytes_out", ww.BytesWritten()).Msg("incoming_request")
+			}()
+			next.ServeHTTP(ww, r)
+		}
+		return http.HandlerFunc(fn)
+	}
+}
+
 func main() {
 	resolver, err := dnscache.New(5*time.Minute, 5*time.Second)
 	if err != nil {
@@ -82,8 +104,7 @@ func main() {
 	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
 	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
+	r.Use(Logger(log.Logger))
 	r.Mount("/debug", middleware.Profiler())
 
 	handler, err := gzhttp.NewWrapper(gzhttp.MinSize(0))
