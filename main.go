@@ -103,7 +103,6 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 	postID := chi.URLParam(r, "postID")
 
 	var i InstaData
-	var data gjson.Result
 
 	// 1. Use Embed
 	// 2. Scrape from graphql
@@ -112,20 +111,18 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	data = gjson.Parse(b2s(response)).Get("data")
+	data := gjson.Parse(b2s(response)).Get("data")
 
-	item := data.Get("shortcode_media")
-	if !item.Exists() {
-		item = data.Get("xdt_shortcode_media")
-		if !item.Exists() {
-			http.Error(w, "Post not found", http.StatusNotFound)
-			return
-		}
+	if !bytes.Contains(response, []byte("shortcode_media")) {
+		http.Error(w, "Post not found", http.StatusNotFound)
+		return
 	}
 
-	media := []gjson.Result{item}
-	if item.Get("edge_sidecar_to_children").Exists() {
-		media = item.Get("edge_sidecar_to_children.edges").Array()
+	var item gjson.Result
+	if bytes.Contains(response, []byte("xdt_shortcode_media")) {
+		item = data.Get("xdt_shortcode_media")
+	} else {
+		item = data.Get("shortcode_media")
 	}
 
 	i.PostID = nocopy.String(postID)
@@ -137,6 +134,13 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 	i.Caption = nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String())
 
 	// Get medias
+	var media []gjson.Result
+	if bytes.Contains(response, []byte("edge_sidecar_to_children")) {
+		media = item.Get("edge_sidecar_to_children.edges").Array()
+	} else {
+		media = []gjson.Result{item}
+	}
+
 	i.Medias = make([]Media, 0, len(media))
 	for _, m := range media {
 		if m.Get("node").Exists() {
