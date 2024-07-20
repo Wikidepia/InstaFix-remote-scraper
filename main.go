@@ -116,6 +116,7 @@ func main() {
 		panic(err)
 	}
 	r.Use(middleware.Logger)
+	r.Use(middleware.Recoverer)
 	r.Use(compressor)
 	r.Mount("/debug", middleware.Profiler())
 	r.Get("/scrape/{postID}", http.HandlerFunc(Scrape))
