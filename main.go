@@ -140,6 +140,7 @@ func main() {
 	}
 	r.Use(Logger(log.Logger))
 	r.Use(compressor)
+	r.Mount("/debug", middleware.Profiler())
 	r.Get("/scrape/{postID}", http.HandlerFunc(Scrape))
 
 	err = http.ListenAndServe(":3001", r)
