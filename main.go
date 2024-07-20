@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	_ "embed"
 	"net"
 	"net/http"
 	"runtime/debug"
@@ -11,11 +12,14 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/CAFxX/httpcompression"
+	"github.com/CAFxX/httpcompression/contrib/klauspost/zstd"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
+	kpzstd "github.com/klauspost/compress/zstd"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/tidwall/gjson"
@@ -62,6 +66,9 @@ var header = http.Header{
 }
 var postData = "__a=1&__ccg=UNKNOWN&__comet_req=7&__csr=n2Yfg_5hcQAG5mPtfEzil8Wn-DpKGBXhdczlAhrK8uHBAGuKCJeCieLDyExenh68aQAKta8p8ShogKkF5yaUBqCpF9XHmmhoBXyBKbQp0HCwDjqoOepV8Tzk8xeXqAGFTVoCciGaCgvGUtVU-u5Vp801nrEkO0rC58xw41g0VW07ISyie2W1v7F0CwYwwwvEkw8K5cM0VC1dwdi0hCbc094w6MU1xE02lzw&__d=www&__dyn=7xeUjG1mxu1syUbFp40NonwgU7SbzEdF8aUco2qwJw5ux609vCwjE1xoswaq0yE6ucw5Mx62G5UswoEcE7O2l0Fwqo31w9a9wtUd8-U2zxe2GewGw9a362W2K0zK5o4q3y1Sx-0iS2Sq2-azo7u3C2u2J0bS1LwTwKG1pg2fwxyo6O1FwlEcUed6goK2O4UrAwCAxW6Uf9EObzVU8U&__hs=19888.HYP%3Ainstagram_web_pkg.2.1..0.0&__hsi=7380500578385702299&__req=k&__rev=1014227545&__s=trbjos%3An8dn55%3Ayev1rm&__spin_b=trunk&__spin_r=1014227545&__spin_t=1718406700&__user=0&av=0&doc_id=25531498899829322&dpr=2&fb_api_caller_class=RelayModern&fb_api_req_friendly_name=PolarisPostActionLoadPostQueryQuery&jazoest=2882&lsd=AVoPBTXMX0Y&server_timestamps=true&variables=%7B%22shortcode%22%3A%22$$POSTID$$%22%7D"
 var rl = ratelimit.New(20)
+
+//go:embed dictionary.bin
+var dict []byte
 
 // b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
@@ -120,18 +127,24 @@ func main() {
 	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
 	r := chi.NewRouter()
-	r.Use(Logger(log.Logger))
-	r.Mount("/debug", middleware.Profiler())
-
-	handler, err := gzhttp.NewWrapper(gzhttp.MinSize(0))
+	zdEnc, err := zstd.New(kpzstd.WithEncoderDict(dict), kpzstd.WithEncoderLevel(kpzstd.SpeedFastest))
 	if err != nil {
-		println(err)
+		panic(err)
 	}
-	r.Get("/scrape/{postID}", handler(http.HandlerFunc(Scrape)))
+	compressor, err := httpcompression.Adapter(
+		httpcompression.GzipCompressionLevel(4),
+		httpcompression.Compressor(zstd.Encoding, 1, zdEnc),
+	)
+	if err != nil {
+		panic(err)
+	}
+	r.Use(Logger(log.Logger))
+	r.Use(compressor)
+	r.Get("/scrape/{postID}", http.HandlerFunc(Scrape))
 
 	err = http.ListenAndServe(":3001", r)
 	if err != nil {
-		println(err)
+		panic(err)
 	}
 }
 
