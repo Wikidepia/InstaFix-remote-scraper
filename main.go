@@ -2,7 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
@@ -92,14 +94,28 @@ func main() {
 		panic(err)
 	}
 	rand.Seed(uint64(time.Now().UTC().UnixNano()))
+
 	transportCache := &http.Transport{
 		// ForceAttemptHTTP2:     true,
-		DialContext:           dnscache.DialFunc(resolver, nil),
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	cacheDialCtx := dnscache.DialFunc(resolver, nil)
+	baseDialFunc := (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		DualStack: true,
+	}).DialContext
+	transportCache.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		if addr == "www.instagram.com:443" {
+			// IP is geo based, need to add some flag
+			return baseDialFunc(ctx, network, "157.240.218.174:443")
+		}
+		return cacheDialCtx(ctx, network, addr)
 	}
 	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
