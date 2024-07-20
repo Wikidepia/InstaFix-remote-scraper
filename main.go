@@ -132,8 +132,7 @@ func main() {
 		panic(err)
 	}
 	compressor, err := httpcompression.Adapter(
-		httpcompression.GzipCompressionLevel(4),
-		httpcompression.Compressor(zstd.Encoding, 1, zdEnc),
+		httpcompression.Compressor("zstd.dict", 1, zdEnc),
 	)
 	if err != nil {
 		panic(err)
