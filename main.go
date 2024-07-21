@@ -105,7 +105,7 @@ func main() {
 	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
 	r := chi.NewRouter()
-	zdEnc, err := zstd.New(kpzstd.WithEncoderDict(dict), kpzstd.WithEncoderLevel(kpzstd.SpeedFastest))
+	zdEnc, err := zstd.New(kpzstd.WithLowerEncoderMem(true), kpzstd.WithEncoderDict(dict), kpzstd.WithEncoderLevel(kpzstd.SpeedFastest))
 	if err != nil {
 		panic(err)
 	}
