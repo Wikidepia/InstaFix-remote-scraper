@@ -131,8 +131,6 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 	rl.Take()
 	postID := chi.URLParam(r, "postID")
 
-	var i InstaData
-
 	// TODO: 1. Use Embed
 	// 2. Scrape from graphql
 	response, err := ParseGQL(postID)
@@ -154,14 +152,16 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		item = data.Get("shortcode_media")
 	}
 
+	idata := new(InstaData)
+
 	// Skipped to save LTE data
 	// i.PostID = nocopy.String(postID)
 
 	// Get username
-	i.Username = nocopy.String(item.Get("owner.username").String())
+	idata.Username = nocopy.String(item.Get("owner.username").String())
 
 	// Get caption
-	i.Caption = nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String())
+	idata.Caption = nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String())
 
 	// Get medias
 	var media []gjson.Result
@@ -171,7 +171,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		media = []gjson.Result{item}
 	}
 
-	i.Medias = make([]Media, 0, len(media))
+	idata.Medias = make([]Media, 0, len(media))
 	for _, m := range media {
 		if m.Get("node").Exists() {
 			m = m.Get("node")
@@ -180,13 +180,13 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		if !mediaURL.Exists() {
 			mediaURL = m.Get("display_url")
 		}
-		i.Medias = append(i.Medias, Media{
+		idata.Medias = append(idata.Medias, Media{
 			TypeName: nocopy.String(m.Get("__typename").String()),
 			URL:      nocopy.String(mediaURL.String()),
 		})
 	}
 
-	err = binary.MarshalTo(i, w)
+	err = binary.MarshalTo(idata, w)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
