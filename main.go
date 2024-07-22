@@ -133,7 +133,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 
 	var i InstaData
 
-	// 1. Use Embed
+	// TODO: 1. Use Embed
 	// 2. Scrape from graphql
 	response, err := ParseGQL(postID)
 	if err != nil {
