@@ -154,10 +154,9 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		item = data.Get("shortcode_media")
 	}
 
-	idata := new(InstaData)
-
-	// Skipped to save LTE data
-	// i.PostID = nocopy.String(postID)
+	idata := &InstaData{
+		PostID: nocopy.String(postID),
+	}
 
 	// Get username
 	idata.Username = nocopy.String(item.Get("owner.username").String())
