@@ -104,7 +104,6 @@ func main() {
 	}
 	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
-	r := chi.NewRouter()
 	zdEnc, err := zstd.New(kpzstd.WithLowerEncoderMem(true), kpzstd.WithEncoderDict(dict), kpzstd.WithEncoderLevel(kpzstd.SpeedFastest))
 	if err != nil {
 		panic(err)
@@ -115,9 +114,12 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
+
+	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(compressor)
+
 	r.Mount("/debug", middleware.Profiler())
 	r.Get("/scrape/{postID}", http.HandlerFunc(Scrape))
 
@@ -184,6 +186,11 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 			TypeName: nocopy.String(m.Get("__typename").String()),
 			URL:      nocopy.String(mediaURL.String()),
 		})
+	}
+
+	if len(idata.Medias) == 0 {
+		http.Error(w, "Post not found", http.StatusNotFound)
+		return
 	}
 
 	err = binary.MarshalTo(idata, w)
