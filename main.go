@@ -21,7 +21,6 @@ import (
 	kpzstd "github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 	"go.mercari.io/go-dnscache"
-	"go.uber.org/ratelimit"
 	"golang.org/x/exp/rand"
 )
 
@@ -62,7 +61,6 @@ var header = http.Header{
 	"x-ig-app-id":                 {"936619743392459"},
 }
 var postData = "__a=1&__ccg=UNKNOWN&__comet_req=7&__csr=n2Yfg_5hcQAG5mPtfEzil8Wn-DpKGBXhdczlAhrK8uHBAGuKCJeCieLDyExenh68aQAKta8p8ShogKkF5yaUBqCpF9XHmmhoBXyBKbQp0HCwDjqoOepV8Tzk8xeXqAGFTVoCciGaCgvGUtVU-u5Vp801nrEkO0rC58xw41g0VW07ISyie2W1v7F0CwYwwwvEkw8K5cM0VC1dwdi0hCbc094w6MU1xE02lzw&__d=www&__dyn=7xeUjG1mxu1syUbFp40NonwgU7SbzEdF8aUco2qwJw5ux609vCwjE1xoswaq0yE6ucw5Mx62G5UswoEcE7O2l0Fwqo31w9a9wtUd8-U2zxe2GewGw9a362W2K0zK5o4q3y1Sx-0iS2Sq2-azo7u3C2u2J0bS1LwTwKG1pg2fwxyo6O1FwlEcUed6goK2O4UrAwCAxW6Uf9EObzVU8U&__hs=19888.HYP%3Ainstagram_web_pkg.2.1..0.0&__hsi=7380500578385702299&__req=k&__rev=1014227545&__s=trbjos%3An8dn55%3Ayev1rm&__spin_b=trunk&__spin_r=1014227545&__spin_t=1718406700&__user=0&av=0&doc_id=25531498899829322&dpr=2&fb_api_caller_class=RelayModern&fb_api_req_friendly_name=PolarisPostActionLoadPostQueryQuery&jazoest=2882&lsd=AVoPBTXMX0Y&server_timestamps=true&variables=%7B%22shortcode%22%3A%22$$POSTID$$%22%7D"
-var rl = ratelimit.New(20)
 
 //go:embed dictionary.bin
 var dict []byte
@@ -118,6 +116,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
+	r.Use(middleware.ThrottleBacklog(20, 200, 30*time.Second))
 	r.Use(compressor)
 
 	r.Mount("/debug", middleware.Profiler())
@@ -130,7 +129,6 @@ func main() {
 }
 
 func Scrape(w http.ResponseWriter, r *http.Request) {
-	rl.Take()
 	postID := chi.URLParam(r, "postID")
 
 	// TODO: 1. Use Embed
