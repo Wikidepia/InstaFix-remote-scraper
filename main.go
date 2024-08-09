@@ -187,7 +187,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if len(idata.Medias) == 0 {
+	if len(idata.Username) == 0 {
 		http.Error(w, "Post not found", http.StatusNotFound)
 		return
 	}
