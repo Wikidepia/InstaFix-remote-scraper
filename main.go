@@ -116,7 +116,7 @@ func main() {
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.ThrottleBacklog(20, 200, 30*time.Second))
+	r.Use(middleware.ThrottleBacklog(20, 1000, 30*time.Second))
 	r.Use(compressor)
 
 	r.Mount("/debug", middleware.Profiler())
