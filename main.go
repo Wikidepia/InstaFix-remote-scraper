@@ -154,6 +154,11 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		item = data.Get("shortcode_media")
 	}
 
+	if item.Value() == nil {
+		http.Error(w, "shortcode_media is empty", http.StatusNotFound)
+		return
+	}
+
 	idata := &InstaData{
 		PostID: nocopy.String(postID),
 	}
