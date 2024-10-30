@@ -96,7 +96,7 @@ func main() {
 	transportCache.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if addr == "www.instagram.com:443" {
 			// IP is geo based, need to add some flag
-			return baseDialFunc(ctx, network, "157.240.218.174:443")
+			return baseDialFunc(ctx, network, "31.13.95.174:443")
 		}
 		return cacheDialCtx(ctx, network, addr)
 	}
