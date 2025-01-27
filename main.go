@@ -189,14 +189,17 @@ func handleSession(session *smux.Session) {
 }
 
 func handleScrape(postID string) (InstaData, error) {
+	idata := InstaData{
+		PostID: nocopy.String(postID),
+	}
 	response, err := parseGQL(postID)
 	if err != nil {
-		return InstaData{}, err
+		return idata, err
 	}
 
 	data := gjson.Parse(b2s(response)).Get("data")
 	if !bytes.Contains(response, []byte("shortcode_media")) {
-		return InstaData{}, errors.New("post not found")
+		return idata, errors.New("post not found")
 	}
 
 	var item gjson.Result
@@ -207,14 +210,11 @@ func handleScrape(postID string) (InstaData, error) {
 	}
 
 	if item.Value() == nil {
-		return InstaData{}, errors.New("shortcode_media is empty")
+		return idata, errors.New("shortcode_media is empty")
 	}
 
-	idata := InstaData{
-		PostID:   nocopy.String(postID),
-		Username: nocopy.String(item.Get("owner.username").String()),
-		Caption:  nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String()),
-	}
+	idata.Username = nocopy.String(item.Get("owner.username").String())
+	idata.Caption = nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String())
 
 	// Get medias
 	var media []gjson.Result
