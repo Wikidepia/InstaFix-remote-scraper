@@ -4,24 +4,21 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	_ "embed"
+	"errors"
+	"flag"
+	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
-	"github.com/CAFxX/httpcompression"
-	"github.com/CAFxX/httpcompression/contrib/klauspost/zstd"
-	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
-	"github.com/klauspost/compress/gzhttp"
-	kpzstd "github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
-	"go.mercari.io/go-dnscache"
-	"golang.org/x/exp/rand"
+	"github.com/xtaci/smux"
 )
 
 type Media struct {
@@ -37,33 +34,8 @@ type InstaData struct {
 }
 
 // Copied from DefaultTransport
-var transport http.RoundTripper
-var header = http.Header{
-	"accept":                      {"*/*"},
-	"accept-language":             {"en-US,en;q=0.9"},
-	"content-type":                {"application/x-www-form-urlencoded"},
-	"origin":                      {"https://www.instagram.com"},
-	"priority":                    {"u=1, i"},
-	"sec-ch-prefers-color-scheme": {"dark"},
-	"sec-ch-ua":                   {`"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"`},
-	"sec-ch-ua-full-version-list": {`"Google Chrome";v="125.0.6422.142", "Chromium";v="125.0.6422.142", "Not.A/Brand";v="24.0.0.0"`},
-	"sec-ch-ua-mobile":            {"?0"},
-	"sec-ch-ua-model":             {`""`},
-	"sec-ch-ua-platform":          {`"macOS"`},
-	"sec-ch-ua-platform-version":  {`"12.7.4"`},
-	"sec-fetch-dest":              {"empty"},
-	"sec-fetch-mode":              {"cors"},
-	"sec-fetch-site":              {"same-origin"},
-	"user-agent":                  {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"},
-	"x-asbd-id":                   {"129477"},
-	"x-bloks-version-id":          {"e2004666934296f275a5c6b2c9477b63c80977c7cc0fd4b9867cb37e36092b68"},
-	"x-fb-friendly-name":          {"PolarisPostActionLoadPostQueryQuery"},
-	"x-ig-app-id":                 {"936619743392459"},
-}
-var postData = "fb_api_caller_class=RelayModern&fb_api_req_friendly_name=PolarisPostActionLoadPostQueryQuery&variables=%7B%22shortcode%22%3A%22$$POSTID$$%22%2C%22fetch_tagged_user_count%22%3Anull%2C%22hoisted_comment_id%22%3Anull%2C%22hoisted_reply_id%22%3Anull%7D&doc_id=8845758582119845"
-
-//go:embed dictionary.bin
-var dict []byte
+var reqHeader http.Header
+var transportCache *http.Transport
 
 // b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
@@ -71,77 +43,157 @@ func b2s(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
 }
 
-func main() {
-	resolver, err := dnscache.New(5*time.Minute, 5*time.Second)
-	if err != nil {
-		panic(err)
-	}
-	rand.Seed(uint64(time.Now().UTC().UnixNano()))
+func init() {
+	reqHeader = http.Header{}
+	reqHeader.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:128.0) Gecko/20100101 Firefox/128.0")
+	reqHeader.Set("Accept", "*/*")
+	reqHeader.Set("Accept-Language", "en-US,en;q=0.5")
+	reqHeader.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqHeader.Set("X-FB-Friendly-Name", "PolarisPostActionLoadPostQueryQuery")
+	reqHeader.Set("Origin", "https://www.instagram.com")
+	reqHeader.Set("DNT", "1")
+	reqHeader.Set("Sec-GPC", "1")
+	reqHeader.Set("Connection", "keep-alive")
+	reqHeader.Set("Sec-Fetch-Dest", "empty")
+	reqHeader.Set("Sec-Fetch-Mode", "cors")
+	reqHeader.Set("Sec-Fetch-Site", "same-origin")
+	reqHeader.Set("Pragma", "no-cache")
+	reqHeader.Set("Cache-Control", "no-cache")
+	reqHeader.Set("TE", "trailers")
 
-	transportCache := &http.Transport{
-		// ForceAttemptHTTP2:     true,
+	baseDialFunc := (&net.Dialer{
+		Timeout:   30 * time.Second,
+		KeepAlive: 30 * time.Second,
+		DualStack: true,
+	}).DialContext
+	transportCache = &http.Transport{
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
 		MaxIdleConns:          100,
 		IdleConnTimeout:       90 * time.Second,
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 	}
-
-	cacheDialCtx := dnscache.DialFunc(resolver, nil)
-	baseDialFunc := (&net.Dialer{
-		Timeout:   30 * time.Second,
-		KeepAlive: 30 * time.Second,
-		DualStack: true,
-	}).DialContext
 	transportCache.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
 		if addr == "www.instagram.com:443" {
 			// IP is geo based, need to add some flag
 			return baseDialFunc(ctx, network, "157.240.7.174:443")
 		}
-		return cacheDialCtx(ctx, network, addr)
-	}
-	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
-
-	zdEnc, err := zstd.New(kpzstd.WithLowerEncoderMem(true), kpzstd.WithEncoderDict(dict), kpzstd.WithEncoderLevel(kpzstd.SpeedFastest))
-	if err != nil {
-		panic(err)
-	}
-	compressor, err := httpcompression.Adapter(
-		httpcompression.Compressor("zstd.dict", 1, zdEnc),
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	r := chi.NewRouter()
-	r.Use(middleware.Logger)
-	r.Use(middleware.Recoverer)
-	r.Use(middleware.ThrottleBacklog(20, 1000, 30*time.Second))
-	r.Use(compressor)
-
-	r.Mount("/debug", middleware.Profiler())
-	r.Get("/scrape/{postID}", http.HandlerFunc(Scrape))
-
-	err = http.ListenAndServe(":3001", r)
-	if err != nil {
-		panic(err)
+		return baseDialFunc(ctx, network, addr)
 	}
 }
 
-func Scrape(w http.ResponseWriter, r *http.Request) {
-	postID := chi.URLParam(r, "postID")
+func main() {
+	serverAddr := flag.String("server-addr", "", "server address")
+	interfaceAddr := flag.String("interface-addr", "", "interface address")
+	flag.Parse()
 
-	// TODO: 1. Use Embed
-	// 2. Scrape from graphql
-	response, err := ParseGQL(postID)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	if *serverAddr == "" {
+		slog.Error("server-addr or interface-addr is empty")
 		return
 	}
+
+	addr, err := net.ResolveTCPAddr("tcp", *serverAddr)
+	if err != nil {
+		slog.Error("resolve tcp addr error", "err", err)
+		return
+	}
+
+	laddr, err := net.ResolveTCPAddr("tcp", *interfaceAddr)
+	if err != nil {
+		slog.Error("resolve tcp addr error", "err", err)
+		return
+	}
+
+	smuxConfig := smux.DefaultConfig()
+	smuxConfig.Version = 2
+	for {
+		// Get a TCP connection
+		conn, err := net.DialTCP("tcp", laddr, addr)
+		if err != nil {
+			slog.Error("dial error", "err", err)
+			continue
+		}
+
+		session, err := smux.Client(conn, smuxConfig)
+		if err != nil {
+			slog.Error("smux client error", "err", err)
+			continue
+		}
+
+		go handleSession(session)
+
+		<-session.CloseChan()
+	}
+}
+
+func handleSession(session *smux.Session) {
+	var (
+		count     int64
+		semaphore = make(chan struct{}, 32)
+		closeChan = make(chan struct{})
+	)
+
+	defer session.Close()
+	for {
+		semaphore <- struct{}{}
+		atomic.AddInt64(&count, 1)
+
+		// Close session if failed to open new stream
+		select {
+		case <-closeChan:
+			return
+		default:
+		}
+
+		go func(session *smux.Session, currentCount int64) {
+			defer func() { <-semaphore }()
+
+			stream, err := session.OpenStream()
+			if err != nil {
+				slog.Error("open stream error", "count", currentCount, "err", err)
+				closeChan <- struct{}{}
+				return
+			}
+			defer stream.Close()
+
+			for {
+				buf := make([]byte, 128)
+				n, err := stream.Read(buf)
+				if err != nil {
+					slog.Error("read error", "count", currentCount, "err", err)
+					return
+				}
+
+				slog.Info("Received data", "count", currentCount, "buf", string(buf[:n]))
+				idata, err := handleScrape(string(buf[:n]))
+				if err != nil {
+					slog.Error("scraping error", "count", currentCount, "buf", string(buf[:n]), "err", err)
+				}
+
+				idataMarshal, err := binary.Marshal(idata)
+				if err != nil {
+					slog.Error("marshal error", "err", err)
+					return
+				}
+
+				if _, err := stream.Write(idataMarshal); err != nil {
+					slog.Error("write error", "count", currentCount, "err", err)
+					return
+				}
+			}
+		}(session, count)
+	}
+}
+
+func handleScrape(postID string) (InstaData, error) {
+	response, err := parseGQL(postID)
+	if err != nil {
+		return InstaData{}, err
+	}
+
 	data := gjson.Parse(b2s(response)).Get("data")
 	if !bytes.Contains(response, []byte("shortcode_media")) {
-		http.Error(w, "Post not found", http.StatusNotFound)
-		return
+		return InstaData{}, errors.New("post not found")
 	}
 
 	var item gjson.Result
@@ -152,19 +204,14 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if item.Value() == nil {
-		http.Error(w, "shortcode_media is empty", http.StatusNotFound)
-		return
+		return InstaData{}, errors.New("shortcode_media is empty")
 	}
 
-	idata := &InstaData{
-		PostID: nocopy.String(postID),
+	idata := InstaData{
+		PostID:   nocopy.String(postID),
+		Username: nocopy.String(item.Get("owner.username").String()),
+		Caption:  nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String()),
 	}
-
-	// Get username
-	idata.Username = nocopy.String(item.Get("owner.username").String())
-
-	// Get caption
-	idata.Caption = nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String())
 
 	// Get medias
 	var media []gjson.Result
@@ -190,28 +237,24 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if len(idata.Username) == 0 {
-		http.Error(w, "Post not found", http.StatusNotFound)
-		return
+		return InstaData{}, errors.New("post not found")
 	}
-
-	err = binary.MarshalTo(idata, w)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	return idata, nil
 }
 
-func ParseGQL(postID string) ([]byte, error) {
-	newParams := strings.Replace(postData, "$$POSTID$$", postID, -1)
-	client := http.Client{
-		Transport: transport,
+func parseGQL(postID string) ([]byte, error) {
+	params := url.Values{
+		"variables":         {"{\"shortcode\":\"" + postID + "\",\"fetch_tagged_user_count\":null,\"hoisted_comment_id\":null,\"hoisted_reply_id\":null}"},
+		"server_timestamps": {"true"},
+		"doc_id":            {"8845758582119845"},
 	}
-	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(newParams))
+
+	client := &http.Client{Transport: transportCache, Timeout: 3 * time.Second}
+	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(params.Encode()))
 	if err != nil {
 		return nil, err
 	}
-
-	req.Header = header
+	req.Header = reqHeader
 
 	buf := new(bytes.Buffer)
 	var res *http.Response
