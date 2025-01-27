@@ -85,10 +85,11 @@ func init() {
 func main() {
 	serverAddr := flag.String("server-addr", "", "server address")
 	interfaceAddr := flag.String("interface-addr", "", "interface address")
+	authCode := flag.String("authcode", "", "auth code")
 	flag.Parse()
 
-	if *serverAddr == "" {
-		slog.Error("server-addr or interface-addr is empty")
+	if *serverAddr == "" || *authCode == "" {
+		slog.Error("server-addr or authcode is empty")
 		return
 	}
 
@@ -113,6 +114,8 @@ func main() {
 			slog.Error("dial error", "err", err)
 			continue
 		}
+
+		conn.Write([]byte(*authCode))
 
 		session, err := smux.Client(conn, smuxConfig)
 		if err != nil {
