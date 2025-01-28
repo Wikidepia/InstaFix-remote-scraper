@@ -111,7 +111,8 @@ func main() {
 		// Get a TCP connection
 		conn, err := net.DialTCP("tcp", laddr, addr)
 		if err != nil {
-			slog.Error("dial error", "err", err)
+			slog.Error("dial error, sleeping 5 seconds", "err", err)
+			time.Sleep(5 * time.Second)
 			continue
 		}
 
@@ -160,6 +161,11 @@ func handleSession(session *smux.Session) {
 			defer stream.Close()
 
 			for {
+				if err := stream.SetDeadline(time.Now().Add(time.Second * 10)); err != nil {
+					slog.Error("set deadline error", "count", currentCount, "err", err)
+					return
+				}
+
 				buf := make([]byte, 128)
 				n, err := stream.Read(buf)
 				if err != nil {
