@@ -132,7 +132,7 @@ func main() {
 
 func handleSession(session *smux.Session) {
 	var (
-		count     int64
+		count     int32
 		semaphore = make(chan struct{}, 32)
 		closeChan = make(chan struct{})
 	)
@@ -140,7 +140,7 @@ func handleSession(session *smux.Session) {
 	defer session.Close()
 	for {
 		semaphore <- struct{}{}
-		atomic.AddInt64(&count, 1)
+		atomic.AddInt32(&count, 1)
 
 		// Close session if failed to open new stream
 		select {
@@ -149,7 +149,7 @@ func handleSession(session *smux.Session) {
 		default:
 		}
 
-		go func(session *smux.Session, currentCount int64) {
+		go func(session *smux.Session, currentCount int32) {
 			defer func() { <-semaphore }()
 
 			stream, err := session.OpenStream()
