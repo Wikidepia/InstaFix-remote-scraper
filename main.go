@@ -6,17 +6,17 @@ import (
 	"crypto/tls"
 	"errors"
 	"flag"
-	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unsafe"
 
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 	"github.com/tidwall/gjson"
 	"github.com/xtaci/smux"
 )
@@ -83,25 +83,27 @@ func init() {
 }
 
 func main() {
+	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
+
 	serverAddr := flag.String("server-addr", "", "server address")
 	interfaceAddr := flag.String("interface-addr", "", "interface address")
 	authCode := flag.String("authcode", "", "auth code")
 	flag.Parse()
 
 	if *serverAddr == "" || *authCode == "" {
-		slog.Error("server-addr or authcode is empty")
+		log.Fatal().Msg("server-addr or authcode is empty")
 		return
 	}
 
 	addr, err := net.ResolveTCPAddr("tcp", *serverAddr)
 	if err != nil {
-		slog.Error("resolve tcp addr error", "err", err)
+		log.Fatal().Msg("resolve tcp addr error")
 		return
 	}
 
 	laddr, err := net.ResolveTCPAddr("tcp", *interfaceAddr)
 	if err != nil {
-		slog.Error("resolve tcp addr error", "err", err)
+		log.Fatal().Msg("resolve tcp addr error")
 		return
 	}
 
@@ -111,7 +113,7 @@ func main() {
 		// Get a TCP connection
 		conn, err := net.DialTCP("tcp", laddr, addr)
 		if err != nil {
-			slog.Error("dial error, sleeping 5 seconds", "err", err)
+			log.Error().Err(err).Msg("dial error, sleeping 5 seconds")
 			time.Sleep(5 * time.Second)
 			continue
 		}
@@ -120,7 +122,7 @@ func main() {
 
 		session, err := smux.Client(conn, smuxConfig)
 		if err != nil {
-			slog.Error("smux client error", "err", err)
+			log.Error().Err(err).Msg("smux client error")
 			continue
 		}
 
@@ -132,7 +134,6 @@ func main() {
 
 func handleSession(session *smux.Session) {
 	var (
-		count     int32
 		semaphore = make(chan struct{}, 32)
 		closeChan = make(chan struct{})
 	)
@@ -140,7 +141,6 @@ func handleSession(session *smux.Session) {
 	defer session.Close()
 	for {
 		semaphore <- struct{}{}
-		atomic.AddInt32(&count, 1)
 
 		// Close session if failed to open new stream
 		select {
@@ -149,12 +149,12 @@ func handleSession(session *smux.Session) {
 		default:
 		}
 
-		go func(session *smux.Session, currentCount int32) {
+		go func(session *smux.Session) {
 			defer func() { <-semaphore }()
 
 			stream, err := session.OpenStream()
 			if err != nil {
-				slog.Error("open stream error", "count", currentCount, "err", err)
+				log.Error().Err(err).Msg("open stream error")
 				closeChan <- struct{}{}
 				return
 			}
@@ -162,35 +162,35 @@ func handleSession(session *smux.Session) {
 
 			for {
 				if err := stream.SetDeadline(time.Now().Add(time.Second * 10)); err != nil {
-					slog.Error("set deadline error", "count", currentCount, "err", err)
+					log.Error().Err(err).Msg("set deadline error")
 					return
 				}
 
 				buf := make([]byte, 128)
 				n, err := stream.Read(buf)
 				if err != nil {
-					slog.Error("read error", "count", currentCount, "err", err)
+					log.Error().Err(err).Msg("read error")
 					return
 				}
 
-				slog.Info("Received data", "count", currentCount, "buf", string(buf[:n]))
+				log.Info().Str("buf", string(buf[:n])).Msg("Received data")
 				idata, err := handleScrape(string(buf[:n]))
 				if err != nil {
-					slog.Error("scraping error", "count", currentCount, "buf", string(buf[:n]), "err", err)
+					log.Error().Str("buf", string(buf[:n])).Err(err).Msg("scraping error")
 				}
 
 				idataMarshal, err := binary.Marshal(idata)
 				if err != nil {
-					slog.Error("marshal error", "err", err)
+					log.Error().Err(err).Msg("marshal error")
 					return
 				}
 
 				if _, err := stream.Write(idataMarshal); err != nil {
-					slog.Error("write error", "count", currentCount, "err", err)
+					log.Error().Err(err).Msg("write error")
 					return
 				}
 			}
-		}(session, count)
+		}(session)
 	}
 }
 
