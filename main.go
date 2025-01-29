@@ -95,23 +95,18 @@ func main() {
 		return
 	}
 
-	addr, err := net.ResolveTCPAddr("tcp", *serverAddr)
-	if err != nil {
-		log.Fatal().Msg("resolve tcp addr error")
-		return
-	}
-
 	laddr, err := net.ResolveTCPAddr("tcp", *interfaceAddr)
 	if err != nil {
 		log.Fatal().Msg("resolve tcp addr error")
 		return
 	}
+	d := net.Dialer{Timeout: 5 * time.Second, LocalAddr: laddr}
 
 	smuxConfig := smux.DefaultConfig()
 	smuxConfig.Version = 2
 	for {
 		// Get a TCP connection
-		conn, err := net.DialTCP("tcp", laddr, addr)
+		conn, err := d.Dial("tcp", *serverAddr)
 		if err != nil {
 			log.Error().Err(err).Msg("dial error, sleeping 5 seconds")
 			time.Sleep(5 * time.Second)
