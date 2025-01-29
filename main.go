@@ -9,6 +9,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 	"unsafe"
@@ -190,9 +191,19 @@ func handleSession(session *smux.Session) {
 }
 
 func handleScrape(postID string) (InstaData, error) {
+	var err error
 	idata := InstaData{
 		PostID: nocopy.String(postID),
 	}
+
+	if postID[0] == 'B' {
+		postID, err = getSharePostID(postID)
+		if err != nil {
+			return InstaData{}, err
+		}
+		idata.PostID = nocopy.String(postID)
+	}
+
 	response, err := parseGQL(postID)
 	if err != nil {
 		return idata, err
@@ -282,4 +293,25 @@ func parseGQL(postID string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func getSharePostID(postID string) (string, error) {
+	req, err := http.NewRequest("HEAD", "https://www.instagram.com/share/p/"+postID+"/", nil)
+	if err != nil {
+		return postID, err
+	}
+	resp, err := transportCache.RoundTrip(req)
+	if err != nil {
+		return postID, err
+	}
+	defer resp.Body.Close()
+	redirURL, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		return postID, err
+	}
+	postIDTemp := path.Base(redirURL.Path)
+	if postIDTemp == "login" {
+		return postID, errors.New("not logged in")
+	}
+	return postIDTemp, nil
 }
