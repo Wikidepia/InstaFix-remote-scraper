@@ -14,12 +14,13 @@ import (
 	"time"
 	"unsafe"
 
+	_ "net/http/pprof"
+
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/tidwall/gjson"
-	"github.com/xtaci/smux"
 )
 
 type Media struct {
@@ -37,6 +38,7 @@ type InstaData struct {
 // Copied from DefaultTransport
 var reqHeader http.Header
 var transportCache *http.Transport
+var semaphore = make(chan struct{}, 32)
 
 // b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
@@ -96,6 +98,10 @@ func main() {
 		return
 	}
 
+	go func() {
+		http.ListenAndServe("localhost:6060", nil)
+	}()
+
 	laddr, err := net.ResolveTCPAddr("tcp", *interfaceAddr)
 	if err != nil {
 		log.Fatal().Msg("resolve tcp addr error")
@@ -103,9 +109,9 @@ func main() {
 	}
 	d := net.Dialer{Timeout: 5 * time.Second, LocalAddr: laddr}
 
-	smuxConfig := smux.DefaultConfig()
-	smuxConfig.Version = 2
 	for {
+		semaphore <- struct{}{}
+
 		// Get a TCP connection
 		conn, err := d.Dial("tcp", *serverAddr)
 		if err != nil {
@@ -115,78 +121,45 @@ func main() {
 		}
 
 		conn.Write([]byte(*authCode))
-
-		session, err := smux.Client(conn, smuxConfig)
-		if err != nil {
-			log.Error().Err(err).Msg("smux client error")
-			continue
-		}
-
-		go handleSession(session)
-
-		<-session.CloseChan()
+		go handleConnection(conn)
 	}
 }
 
-func handleSession(session *smux.Session) {
-	var (
-		semaphore = make(chan struct{}, 32)
-		closeChan = make(chan struct{})
-	)
+func handleConnection(conn net.Conn) {
+	defer func() {
+		conn.Close()
+		<-semaphore
+	}()
 
-	defer session.Close()
 	for {
-		semaphore <- struct{}{}
-
-		// Close session if failed to open new stream
-		select {
-		case <-closeChan:
+		if err := conn.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+			log.Error().Err(err).Msg("set deadline error")
 			return
-		default:
 		}
 
-		go func(session *smux.Session) {
-			defer func() { <-semaphore }()
+		buf := make([]byte, 128)
+		n, err := conn.Read(buf)
+		if err != nil {
+			log.Error().Err(err).Msg("read error")
+			return
+		}
 
-			stream, err := session.OpenStream()
-			if err != nil {
-				log.Error().Err(err).Msg("open stream error")
-				closeChan <- struct{}{}
-				return
-			}
-			defer stream.Close()
+		log.Info().Str("buf", b2s(buf[:n])).Msg("Received data")
+		idata, err := handleScrape(b2s(buf[:n]))
+		if err != nil {
+			log.Error().Str("buf", b2s(buf[:n])).Err(err).Msg("scraping error")
+		}
 
-			for {
-				if err := stream.SetDeadline(time.Now().Add(time.Second * 10)); err != nil {
-					log.Error().Err(err).Msg("set deadline error")
-					return
-				}
+		idataMarshal, err := binary.Marshal(idata)
+		if err != nil {
+			log.Error().Err(err).Msg("marshal error")
+			return
+		}
 
-				buf := make([]byte, 128)
-				n, err := stream.Read(buf)
-				if err != nil {
-					log.Error().Err(err).Msg("read error")
-					return
-				}
-
-				log.Info().Str("buf", string(buf[:n])).Msg("Received data")
-				idata, err := handleScrape(string(buf[:n]))
-				if err != nil {
-					log.Error().Str("buf", string(buf[:n])).Err(err).Msg("scraping error")
-				}
-
-				idataMarshal, err := binary.Marshal(idata)
-				if err != nil {
-					log.Error().Err(err).Msg("marshal error")
-					return
-				}
-
-				if _, err := stream.Write(idataMarshal); err != nil {
-					log.Error().Err(err).Msg("write error")
-					return
-				}
-			}
-		}(session)
+		if _, err := conn.Write(idataMarshal); err != nil {
+			log.Error().Err(err).Msg("write error")
+			return
+		}
 	}
 }
 
