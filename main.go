@@ -7,6 +7,7 @@ import (
 	_ "embed"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 	"unsafe"
@@ -38,29 +39,7 @@ type InstaData struct {
 
 // Copied from DefaultTransport
 var transport http.RoundTripper
-var header = http.Header{
-	"accept":                      {"*/*"},
-	"accept-language":             {"en-US,en;q=0.9"},
-	"content-type":                {"application/x-www-form-urlencoded"},
-	"origin":                      {"https://www.instagram.com"},
-	"priority":                    {"u=1, i"},
-	"sec-ch-prefers-color-scheme": {"dark"},
-	"sec-ch-ua":                   {`"Google Chrome";v="125", "Chromium";v="125", "Not.A/Brand";v="24"`},
-	"sec-ch-ua-full-version-list": {`"Google Chrome";v="125.0.6422.142", "Chromium";v="125.0.6422.142", "Not.A/Brand";v="24.0.0.0"`},
-	"sec-ch-ua-mobile":            {"?0"},
-	"sec-ch-ua-model":             {`""`},
-	"sec-ch-ua-platform":          {`"macOS"`},
-	"sec-ch-ua-platform-version":  {`"12.7.4"`},
-	"sec-fetch-dest":              {"empty"},
-	"sec-fetch-mode":              {"cors"},
-	"sec-fetch-site":              {"same-origin"},
-	"user-agent":                  {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"},
-	"x-asbd-id":                   {"129477"},
-	"x-bloks-version-id":          {"e2004666934296f275a5c6b2c9477b63c80977c7cc0fd4b9867cb37e36092b68"},
-	"x-fb-friendly-name":          {"PolarisPostActionLoadPostQueryQuery"},
-	"x-ig-app-id":                 {"936619743392459"},
-}
-var postData = "fb_api_caller_class=RelayModern&fb_api_req_friendly_name=PolarisPostActionLoadPostQueryQuery&variables=%7B%22shortcode%22%3A%22$$POSTID$$%22%2C%22fetch_tagged_user_count%22%3Anull%2C%22hoisted_comment_id%22%3Anull%2C%22hoisted_reply_id%22%3Anull%7D&doc_id=8845758582119845"
+var reqHeader http.Header
 
 //go:embed dictionary.bin
 var dict []byte
@@ -69,6 +48,25 @@ var dict []byte
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
 func b2s(b []byte) string {
 	return unsafe.String(unsafe.SliceData(b), len(b))
+}
+
+func init() {
+	reqHeader = http.Header{}
+	reqHeader.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:128.0) Gecko/20100101 Firefox/128.0")
+	reqHeader.Set("Accept", "*/*")
+	reqHeader.Set("Accept-Language", "en-US,en;q=0.5")
+	reqHeader.Set("Content-Type", "application/x-www-form-urlencoded")
+	reqHeader.Set("X-FB-Friendly-Name", "PolarisPostActionLoadPostQueryQuery")
+	reqHeader.Set("Origin", "https://www.instagram.com")
+	reqHeader.Set("DNT", "1")
+	reqHeader.Set("Sec-GPC", "1")
+	reqHeader.Set("Connection", "keep-alive")
+	reqHeader.Set("Sec-Fetch-Dest", "empty")
+	reqHeader.Set("Sec-Fetch-Mode", "cors")
+	reqHeader.Set("Sec-Fetch-Site", "same-origin")
+	reqHeader.Set("Pragma", "no-cache")
+	reqHeader.Set("Cache-Control", "no-cache")
+	reqHeader.Set("TE", "trailers")
 }
 
 func main() {
@@ -202,16 +200,21 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 }
 
 func ParseGQL(postID string) ([]byte, error) {
-	newParams := strings.Replace(postData, "$$POSTID$$", postID, -1)
+	params := url.Values{
+		"variables":         {"{\"shortcode\":\"" + postID + "\",\"fetch_tagged_user_count\":null,\"hoisted_comment_id\":null,\"hoisted_reply_id\":null}"},
+		"server_timestamps": {"true"},
+		"doc_id":            {"8845758582119845"},
+	}
+
 	client := http.Client{
 		Transport: transport,
 	}
-	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(newParams))
+	req, err := http.NewRequest("POST", "https://www.instagram.com/graphql/query", strings.NewReader(params.Encode()))
 	if err != nil {
 		return nil, err
 	}
 
-	req.Header = header
+	req.Header = reqHeader
 
 	buf := new(bytes.Buffer)
 	var res *http.Response
