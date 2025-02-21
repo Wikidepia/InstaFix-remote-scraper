@@ -5,9 +5,11 @@ import (
 	"context"
 	"crypto/tls"
 	_ "embed"
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
+	"path"
 	"strings"
 	"time"
 	"unsafe"
@@ -38,8 +40,10 @@ type InstaData struct {
 }
 
 // Copied from DefaultTransport
-var transport http.RoundTripper
-var reqHeader http.Header
+var (
+	transport http.RoundTripper
+	reqHeader http.Header
+)
 
 //go:embed dictionary.bin
 var dict []byte
@@ -128,6 +132,15 @@ func main() {
 
 func Scrape(w http.ResponseWriter, r *http.Request) {
 	postID := chi.URLParam(r, "postID")
+
+	var err error
+	if postID[0] == 'B' {
+		postID, err = GetSharePostID(postID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
 
 	// TODO: 1. Use Embed
 	// 2. Scrape from graphql
@@ -238,4 +251,24 @@ func ParseGQL(postID string) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+func GetSharePostID(postID string) (string, error) {
+	req, err := http.NewRequest("HEAD", "https://www.instagram.com/share/reel/"+postID+"/", nil)
+	if err != nil {
+		return postID, err
+	}
+	resp, err := transport.RoundTrip(req)
+	if err != nil {
+		return postID, err
+	}
+	defer resp.Body.Close()
+	redirURL, err := url.Parse(resp.Header.Get("Location"))
+	if err != nil {
+		return postID, err
+	}
+	if path.Base(redirURL.Path) == "login" {
+		return postID, errors.New("not logged in")
+	}
+	return path.Base(redirURL.Path), nil
 }
