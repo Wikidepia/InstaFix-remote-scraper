@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	_ "embed"
 	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/CAFxX/httpcompression"
 	"github.com/CAFxX/httpcompression/contrib/klauspost/zstd"
+	"github.com/andybalholm/cascadia"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
@@ -25,6 +27,7 @@ import (
 	"github.com/tidwall/gjson"
 	"go.mercari.io/go-dnscache"
 	"golang.org/x/exp/rand"
+	"golang.org/x/net/html"
 )
 
 type Media struct {
@@ -142,64 +145,19 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// TODO: 1. Use Embed
-	// 2. Scrape from graphql
-	response, err := ParseGQL(postID)
+	var idata *InstaData
+	// 1. Scrape from graphql
+	idata, err = ScrapeGQL(postID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	data := gjson.Parse(b2s(response)).Get("data")
-	if !bytes.Contains(response, []byte("shortcode_media")) {
-		http.Error(w, "Post not found", http.StatusNotFound)
-		return
-	}
-
-	var item gjson.Result
-	if bytes.Contains(response, []byte("xdt_shortcode_media")) {
-		item = data.Get("xdt_shortcode_media")
-	} else {
-		item = data.Get("shortcode_media")
-	}
-
-	if item.Value() == nil {
-		http.Error(w, "shortcode_media is empty", http.StatusNotFound)
-		return
-	}
-
-	idata := &InstaData{
-		PostID: nocopy.String(postID),
-	}
-
-	// Get username
-	idata.Username = nocopy.String(item.Get("owner.username").String())
-
-	// Get caption
-	idata.Caption = nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String())
-
-	// Get medias
-	var media []gjson.Result
-	if bytes.Contains(response, []byte("edge_sidecar_to_children")) {
-		media = item.Get("edge_sidecar_to_children.edges").Array()
-	} else {
-		media = []gjson.Result{item}
-	}
-
-	idata.Medias = make([]Media, 0, len(media))
-	for _, m := range media {
-		if m.Get("node").Exists() {
-			m = m.Get("node")
+		slog.Error("failed to scrape from graphql", "postID", postID, "err", err)
+		// 2. Scrape from page directly
+		idata, err = ScrapePage(postID)
+		if err != nil {
+			slog.Error("failed to scrape from direct page", "postID", postID, "err", err)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
 		}
-		mediaURL := m.Get("video_url")
-		if !mediaURL.Exists() {
-			mediaURL = m.Get("display_url")
-		}
-		idata.Medias = append(idata.Medias, Media{
-			TypeName: nocopy.String(m.Get("__typename").String()),
-			URL:      nocopy.String(mediaURL.String()),
-		})
 	}
-
 	if len(idata.Username) == 0 {
 		http.Error(w, "Post not found", http.StatusNotFound)
 		return
@@ -212,7 +170,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func ParseGQL(postID string) ([]byte, error) {
+func ScrapeGQL(postID string) (*InstaData, error) {
 	params := url.Values{
 		"variables":         {"{\"shortcode\":\"" + postID + "\",\"fetch_tagged_user_count\":null,\"hoisted_comment_id\":null,\"hoisted_reply_id\":null}"},
 		"server_timestamps": {"true"},
@@ -250,7 +208,156 @@ func ParseGQL(postID string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buf.Bytes(), nil
+
+	if !bytes.Contains(buf.Bytes(), []byte("shortcode_media")) {
+		return nil, errors.New("post not found")
+	}
+
+	data := gjson.Parse(b2s(buf.Bytes())).Get("data")
+
+	var item gjson.Result
+	if bytes.Contains(buf.Bytes(), []byte("xdt_shortcode_media")) {
+		item = data.Get("xdt_shortcode_media")
+	} else {
+		item = data.Get("shortcode_media")
+	}
+
+	if item.Value() == nil {
+		return nil, errors.New("shortcode_media is empty")
+	}
+
+	idata := &InstaData{
+		PostID:   nocopy.String(postID),
+		Username: nocopy.String(item.Get("owner.username").String()),
+		Caption:  nocopy.String(item.Get("edge_media_to_caption.edges.0.node.text").String()),
+	}
+
+	// Get medias
+	var media []gjson.Result
+	if bytes.Contains(buf.Bytes(), []byte("edge_sidecar_to_children")) {
+		media = item.Get("edge_sidecar_to_children.edges").Array()
+	} else {
+		media = []gjson.Result{item}
+	}
+
+	idata.Medias = make([]Media, 0, len(media))
+	for _, m := range media {
+		if m.Get("node").Exists() {
+			m = m.Get("node")
+		}
+		mediaURL := m.Get("video_url")
+		if !mediaURL.Exists() {
+			mediaURL = m.Get("display_url")
+		}
+		idata.Medias = append(idata.Medias, Media{
+			TypeName: nocopy.String(m.Get("__typename").String()),
+			URL:      nocopy.String(mediaURL.String()),
+		})
+	}
+	return idata, nil
+}
+
+func CSSQuery(n *html.Node, query string) *html.Node {
+	sel, err := cascadia.Parse(query)
+	if err != nil {
+		return &html.Node{}
+	}
+	return cascadia.Query(n, sel)
+}
+
+func CSSAttrOr(n *html.Node, attrName, or string) string {
+	for _, a := range n.Attr {
+		if a.Key == attrName {
+			return a.Val
+		}
+	}
+	return or
+}
+
+func ScrapePage(postID string) (*InstaData, error) {
+	client := http.Client{
+		Transport: transport,
+	}
+	req, err := http.NewRequest("GET", "https://www.instagram.com/p/"+postID+"/", nil)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header = reqHeader
+
+	buf := new(bytes.Buffer)
+	var res *http.Response
+	// TODO Sometimes api returns 5xx error, retrying doesn't help.
+	for i := 0; i < 3; i++ {
+		res, err = client.Do(req)
+		if err != nil {
+			continue
+		}
+		defer res.Body.Close()
+		buf.Reset() // Reset buffer
+		if _, err = buf.ReadFrom(res.Body); err != nil {
+			continue
+		}
+		if bytes.Contains(buf.Bytes(), []byte("require_login")) {
+			continue
+		}
+		break
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	doc, err := html.Parse(buf)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get username
+	twitterTitle := CSSQuery(doc, `meta[name="twitter:title"]`)
+	if twitterTitle == nil {
+		return nil, errors.New("twitter:title not found")
+	}
+
+	twTitleContent := CSSAttrOr(twitterTitle, "content", "")
+	if twTitleContent == "" {
+		return nil, errors.New("twitter:title content is empty")
+	}
+
+	// real name (@username) • Instagram reel
+	var username string
+	usernameLeft := strings.Split(twTitleContent, "(")
+	if len(usernameLeft) == 2 {
+		usernameRight := strings.Split(usernameLeft[1], ")")
+		username = strings.Trim(usernameRight[0], "@")
+	} else {
+		return nil, errors.New("username not found")
+	}
+
+	// Get caption
+	ogDescription := CSSQuery(doc, `meta[name="description"]`)
+	if ogDescription == nil {
+		return nil, errors.New("og:description not found")
+	}
+
+	descriptionContent := CSSAttrOr(ogDescription, "content", "no caption")
+
+	// xxx likes ... : "<real caption>"
+	var caption string
+	captionTrim := strings.Split(descriptionContent, ":")
+	if len(captionTrim) == 2 {
+		caption = strings.Trim(captionTrim[1], ": ")
+	}
+
+	idata := &InstaData{
+		PostID:   nocopy.String(postID),
+		Username: nocopy.String(username),
+		Caption:  nocopy.String(caption),
+	}
+	idata.Medias = append(idata.Medias, Media{
+		TypeName: nocopy.String("GraphImage"),
+		URL:      nocopy.String(CSSAttrOr(CSSQuery(doc, `meta[property="og:image"]`), "content", "no image")),
+	})
+	return idata, nil
 }
 
 func GetSharePostID(postID string) (string, error) {
