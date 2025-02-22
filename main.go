@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
-	_ "embed"
 	"errors"
 	"log/slog"
 	"net"
@@ -15,15 +14,12 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/CAFxX/httpcompression"
-	"github.com/CAFxX/httpcompression/contrib/klauspost/zstd"
 	"github.com/andybalholm/cascadia"
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/kelindar/binary"
 	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
-	kpzstd "github.com/klauspost/compress/zstd"
 	"github.com/tidwall/gjson"
 	"go.mercari.io/go-dnscache"
 	"golang.org/x/exp/rand"
@@ -47,9 +43,6 @@ var (
 	transport http.RoundTripper
 	reqHeader http.Header
 )
-
-//go:embed dictionary.bin
-var dict []byte
 
 // b2s converts byte slice to a string without memory allocation.
 // See https://groups.google.com/forum/#!msg/Golang-Nuts/ENgbUzYvCuU/90yGx7GUAgAJ .
@@ -107,22 +100,10 @@ func main() {
 	}
 	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
-	zdEnc, err := zstd.New(kpzstd.WithLowerEncoderMem(true), kpzstd.WithEncoderDict(dict), kpzstd.WithEncoderLevel(kpzstd.SpeedFastest))
-	if err != nil {
-		panic(err)
-	}
-	compressor, err := httpcompression.Adapter(
-		httpcompression.Compressor("zstd.dict", 1, zdEnc),
-	)
-	if err != nil {
-		panic(err)
-	}
-
 	r := chi.NewRouter()
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.ThrottleBacklog(20, 1000, 30*time.Second))
-	r.Use(compressor)
 
 	r.Mount("/debug", middleware.Profiler())
 	r.Get("/scrape/{postID}", http.HandlerFunc(Scrape))
