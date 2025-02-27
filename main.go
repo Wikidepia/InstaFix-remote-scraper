@@ -21,8 +21,6 @@ import (
 	"github.com/kelindar/binary/nocopy"
 	"github.com/klauspost/compress/gzhttp"
 	"github.com/tidwall/gjson"
-	"go.mercari.io/go-dnscache"
-	"golang.org/x/exp/rand"
 	"golang.org/x/net/html"
 )
 
@@ -70,12 +68,6 @@ func init() {
 }
 
 func main() {
-	resolver, err := dnscache.New(5*time.Minute, 5*time.Second)
-	if err != nil {
-		panic(err)
-	}
-	rand.Seed(uint64(time.Now().UTC().UnixNano()))
-
 	transportCache := &http.Transport{
 		// ForceAttemptHTTP2:     true,
 		TLSClientConfig:       &tls.Config{InsecureSkipVerify: true},
@@ -85,7 +77,6 @@ func main() {
 		ExpectContinueTimeout: 1 * time.Second,
 	}
 
-	cacheDialCtx := dnscache.DialFunc(resolver, nil)
 	baseDialFunc := (&net.Dialer{
 		Timeout:   30 * time.Second,
 		KeepAlive: 30 * time.Second,
@@ -96,7 +87,7 @@ func main() {
 			// IP is geo based, need to add some flag
 			return baseDialFunc(ctx, network, "157.240.7.174:443")
 		}
-		return cacheDialCtx(ctx, network, addr)
+		return baseDialFunc(ctx, network, addr)
 	}
 	transport = gzhttp.Transport(transportCache, gzhttp.TransportAlwaysDecompress(true))
 
@@ -108,7 +99,7 @@ func main() {
 	r.Mount("/debug", middleware.Profiler())
 	r.Get("/scrape/{postID}", http.HandlerFunc(Scrape))
 
-	err = http.ListenAndServe(":3001", r)
+	err := http.ListenAndServe(":3001", r)
 	if err != nil {
 		panic(err)
 	}
@@ -117,18 +108,18 @@ func main() {
 func Scrape(w http.ResponseWriter, r *http.Request) {
 	postID := chi.URLParam(r, "postID")
 
-	var err error
 	if postID[0] == 'B' {
-		postID, err = GetSharePostID(postID)
+		newPostID, err := GetSharePostID(postID)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		postID = newPostID
 	}
 
 	var idata *InstaData
 	// 1. Scrape from graphql
-	idata, err = ScrapeGQL(postID)
+	idata, err := ScrapeGQL(postID)
 	if err != nil {
 		slog.Error("failed to scrape from graphql", "postID", postID, "err", err)
 		// 2. Scrape from page directly
@@ -139,6 +130,7 @@ func Scrape(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+
 	if len(idata.Username) == 0 {
 		http.Error(w, "Post not found", http.StatusNotFound)
 		return
